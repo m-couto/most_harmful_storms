@@ -1,0 +1,267 @@
+---
+title: "The most harmful storms in the U.S. on public health and economy"
+author: "Miguel Couto"
+date: "4/2/2020"
+output: html_document
+keep_md: true
+---
+
+This report concerns the second project of the Reproducible Research course.
+
+## Synopsis
+
+We were provided with data on natural disasters occuring in the United States collected by the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database contains many characteristics of major storms in the U.S. such as when and where they occur, the number of injured and fatalities, and property and crop damage, among many others.
+
+In this report we aim to answer the following two questions:  
+1. What types of events have the most harmful impact on public health?  
+2. What types of events have the highest economic consequences on the population?
+
+We started by processing the raw data, which took particularly long since it was quite untidy. From there, we tackled both questions by presenting a few plots and tables, as well as an answer to each question.
+
+## Data Processing
+
+I started by downloading and reading the data into R. Given the size of the data, we used the *data.table* package to speed up the reading, which in this case reads the data almost twice as fast as the usual *read.csv* function.
+
+```{r cache=TRUE}
+setwd("~/Desktop/Data Science course/5. Reproducible Research/Project 2")   # my local directory
+
+# the data
+download.file('https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2', './Storm Data.csv.bz2')
+
+# file with information on the data
+download.file('https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf', './documentation.pdf')
+
+library(data.table)     # for faster reading
+data <- fread('Storm Data.csv.bz2')
+data <- as.data.frame(data)     # converting to data frame
+```
+
+This database is quite extensive, with 902297 observations of 37 different variables, and it requires an enormous amount of cleansing.
+
+```{r}
+dim(data)
+names(data)
+```
+
+We load two libraries needed for processing the data throughout the analysis.
+
+```{r message=FALSE}
+library(dplyr)      # for easier data frame manipulation
+library(stringr)    # for string manipulation
+```
+
+According to the NOAA, the agency who collected the data, although the data runs from January 1st 1950 up to December 31st 2019, it only considered 4 types of events before 1996; and from then on it recorded 48 different types of events. This information can be found [here](https://www.ncdc.noaa.gov/stormevents/details.jsp?type=eventtype). Therefore, we limit our analysis to all events beginning on January 1st 1996.
+
+```{r warning=FALSE, cache=TRUE}
+data$BGN_DATE <- as.Date(data$BGN_DATE, "%m/%d/%Y")
+data <- filter(data, data$BGN_DATE>="1996-01-01")
+```
+
+For the purposes of this analysis, we focus only the variables pertaining to the two questions described in the Synopsis, namely:  
+* EVTYPE - the type of event;  
+* FATALITIES - the number of people that died due to the event;  
+* INJURIES - the number of injured people due to the event;  
+* PROPDMG and PROPDMGEXP - the valued cost (in US dollars) of the damage done to the property;  
+* CROPDMG and CROPDMGEXP - the valued cost (in US dollars) of the damage done to crops.
+
+Furthermore, given that we want to find the types of storms with the most impact on the health and economy of the population, we focus on events where some health harm (measured by FATALITIES and INJURIES) or economical damage (measured by PROPDMG, PROPDMGEXP, CROPDMG and CROPDMGEXP) has been recorded.
+
+```{r cache=TRUE}
+data <- data %>% select(EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP) %>%
+    filter(FATALITIES>0 | INJURIES>0 | PROPDMG>0| CROPDMG>0)
+dim(data)
+```
+
+At this point, we proceed to cleaning the data, especially column EVTYPE. According to the file we downloaded with the data, there should be 48 different types of events (see table in p.6 of *documentation.pdf*). However, there are a lot more types of events in this data set for various reasons: upper/lower cases, typos, abbreviations, plurals, among other ambiguities. We start cleaning some of these.
+
+```{r cache=TRUE}
+data$EVTYPE <- tolower(data$EVTYPE)     # change all entries to lowercase
+data$EVTYPE <- str_trim(data$EVTYPE)    # remove extra spaces at beginning or end of string
+data$EVTYPE <- gsub("\\s+", " ", data$EVTYPE)   # remove multiple spaces
+
+# abbreviations
+data$EVTYPE <- gsub("tstm", "thunderstorm", data$EVTYPE)
+data$EVTYPE <- gsub("fld", "flood", data$EVTYPE)
+data$EVTYPE <- gsub("cstl", "coastal", data$EVTYPE)
+data$EVTYPE <- gsub("sml", "small", data$EVTYPE)
+data$EVTYPE <- gsub("hvy", "heavy", data$EVTYPE)
+
+# plurals
+data$EVTYPE <- gsub("winds", "wind", data$EVTYPE)
+data$EVTYPE <- gsub("currents", "current", data$EVTYPE)
+
+# ambiguity
+data$EVTYPE <- gsub("flooding", "flood", data$EVTYPE)
+```
+
+We continue sorting the "unofficial" types of events into the 48 official ones. They were sorted by exhaustively inspecting each of the "unofficial" types and selecting the closest possible official event. The file *documentation.pdf* was helpful in this sorting, but there is some subjectivity in this sorting, so here is our code for organizing it.
+
+```{r cache=TRUE}
+data$EVTYPE[grep("hurricane|^typhoon$", data$EVTYPE)] <- "hurricane (typhoon)"
+data$EVTYPE[grep("(slides?|slump)$", data$EVTYPE)] <- 'debris flow'
+data$EVTYPE[grep("(^mixed prec)|(^(light )?freezing rain$)", data$EVTYPE)] <- 'sleet'
+
+data$EVTYPE <- gsub("( g?[0-9]*| \\(g?[0-9]*\\))$", "", data$EVTYPE)
+data$EVTYPE[grep("^non(-| )thunderstorm wind$", data$EVTYPE)] <- "strong wind"
+data$EVTYPE[grep("^thunderstorm( wind(/hail| and lightning))?$", data$EVTYPE)] <- "thunderstorm wind"
+data$EVTYPE[grep("burst$", data$EVTYPE)] <- "thunderstorm wind"
+
+data$EVTYPE[grep('surf', data$EVTYPE)] <- "high surf"
+data$EVTYPE[grep('(^high (sw|se|wa))|(high tide$)', data$EVTYPE)] <- "high surf"
+
+data$EVTYPE[grep("seas$|^(storm surge)$|^((coastal ?storm)|(wind and wave))$", data$EVTYPE)] <- "storm surge/tide"
+
+data$EVTYPE[grep("^hypo|^extreme windchill$", data$EVTYPE)] <- "extreme cold/wind chill"
+data$EVTYPE[grep("^(whirlwind|landspout)$", data$EVTYPE)] <- "tornado"
+data$EVTYPE[grep("(^(gusty|gradient) wind)|(^wind$)|(wind damage)", data$EVTYPE)] <- "strong wind"
+data$EVTYPE[grep("^((marine accident)|(rogue wave))$", data$EVTYPE)] <- "marine strong wind"
+
+data$EVTYPE[grep("^((torrential rainfall)|(unseasonal rain)|(rain)|(drowning))$", data$EVTYPE)] <- "heavy rain"
+
+data$EVTYPE[grep('cold$', data$EVTYPE)] <- "extreme cold/wind chill"
+data$EVTYPE[data$EVTYPE == "cold temperature" | data$EVTYPE == "cold weather" ] <- "extreme cold/wind chill"
+
+data$EVTYPE[grep('erosion|(tidal flood)', data$EVTYPE)] <- "coastal flood"
+data$EVTYPE[grep("^(river|urban|(ice jam))", data$EVTYPE)] <- "flood"
+data$EVTYPE[grep("/flood$", data$EVTYPE)] <- "flood"
+data$EVTYPE[grep("^dam ", data$EVTYPE)] <- "flash flood"
+
+data$EVTYPE[grep('freez|(frost$)', data$EVTYPE)] <- "frost/freeze"
+
+data$EVTYPE[grep('^fog$', data$EVTYPE)] <- "dense fog"
+data$EVTYPE[grep('glaze', data$EVTYPE)] <- 'freezing fog'
+
+data$EVTYPE <- gsub('^lake ','lake-', data$EVTYPE)
+snow <- grep('snow', data$EVTYPE)
+data$EVTYPE[snow[! (snow %in% grep('^((heavy snow)|(lake-effect snow))$', data$EVTYPE))]] <- "heavy snow"
+data$EVTYPE[grep('(^ice (o|r))|(^icy)|(ice$)', data$EVTYPE)] <- "ice storm"
+
+data$EVTYPE[grep('^((heat wave$)|(record heat$)|hyper)', data$EVTYPE)] <- "excessive heat"
+data$EVTYPE[grep("warm", data$EVTYPE)] <- "heat"
+
+data$EVTYPE[grep(' fire$', data$EVTYPE)] <- "wildfire"
+
+data$EVTYPE[grep('mix$', data$EVTYPE)] <- "winter weather"
+
+data$EVTYPE[grep("dust$", data$EVTYPE)] <- "dust storm"
+
+data$EVTYPE[grep("^small hail$", data$EVTYPE)] <- "hail"
+```
+
+The column of types of events now contains the 48 official types and an extra one labelled "other". We do not consider this extra label, so we remove the observations with "other" type of event from our data.
+
+```{r cache=TRUE}
+length(unique(data$EVTYPE))
+
+data <- data[data$EVTYPE != "other",]   # remove other events
+```
+
+We now confirm that the only types of events are official ones. This can be done by direct inspection with the table of types of events in page 6 of *documentation.pdf*. Here we automate this by recording all of them into a vector and comparing it to column EVTYPE.
+
+```{r}
+official <- tolower(c('Astronomical Low Tide', 'Avalanche', 'Blizzard', 'Coastal Flood', 'Cold/Wind Chill', 'Debris Flow', 'Dense Fog', 'Dense Smoke', 'Drought', 'Dust Devil', 'Dust Storm', 'Excessive Heat', 'Extreme Cold/Wind Chill', 'Flash Flood', 'Flood', 'Frost/Freeze', 'Funnel Cloud', 'Freezing Fog', 'Hail', 'Heat', 'Heavy Rain', 'Heavy Snow', 'High Surf', 'High Wind', 'Hurricane (Typhoon)', 'Ice Storm', 'Lake-Effect Snow', 'Lakeshore Flood', 'Lightning', 'Marine Hail', 'Marine High Wind', 'Marine Strong Wind', 'Marine Thunderstorm Wind', 'Rip Current', 'Seiche', 'Sleet', 'Storm Surge/Tide', 'Strong Wind', 'Thunderstorm Wind', 'Tornado', 'Tropical Depression', 'Tropical Storm', 'Tsunami', 'Volcanic Ash', 'Waterspout', 'Wildfire', 'Winter Storm', 'Winter Weather'))
+
+identical(sort(unique(data$EVTYPE)), sort(official))    # check if the elements of EVTYPE column are all official
+```
+
+
+## Results
+
+Since the data is tidy, we now answer the two questions we proposed at the beginning of the report:
+
+### 1. What types of events have the most harmful impact on public health?  
+
+As we have mentioned before, in this data set the impact of storms in public health is measured in number of deaths and injured. We start by computing the total number of fatalities/injured people for each storm, and we plot the total number of fatalities per type of storm.
+
+```{r fig.width=10, fig.height=6}
+health <- data %>% select(EVTYPE, FATALITIES, INJURIES) %>% filter(FATALITIES!=0 | INJURIES!=0) %>% 
+    group_by(EVTYPE) %>% summarize(fatalsum = sum(FATALITIES), injsum = sum(INJURIES))
+
+mostfatal <- health %>% select(EVTYPE, fatalsum) %>% arrange(desc(fatalsum))
+mostfatal$EVTYPE <- factor(mostfatal$EVTYPE, levels=mostfatal$EVTYPE)
+    # We specify the levels here to keep the descending order
+
+op <- par(no.readonly = TRUE)
+par(mar=c(11, 4, 4, 2) + .1)
+barplot(mostfatal$fatalsum ~ mostfatal$EVTYPE, xlab='', ylab='Number of fatalities',
+        main='Number of fatalities per event', las=2)
+```
+
+Excessive heat and tornados are the deadliest types of storms, each totalling over 1500 fatalities in the U.S. since 1996. Note there are only 40 types of events here because 8 types of events caused no human casualties.
+
+We now plot the number of injured people per type of storm.
+
+```{r fig.width=10, fig.height=6}
+mostinj <- health %>% select(EVTYPE, injsum) %>% arrange(desc(injsum))
+mostinj$EVTYPE <- factor(mostinj$EVTYPE, levels=mostinj$EVTYPE)
+
+par(mar=c(11, 4, 4, 2) + .1, mgp=c(3,.5,0))
+barplot(mostinj$injsum ~ mostinj$EVTYPE, xlab='', ylab='Number of injured people',
+        main='Number of injured people per event', las=2)
+```
+
+In terms of injured people, tornados are clearly the most harmful storm events, totalling over 20000 injured people in the U.S. since 1996.
+
+Let's gather all the information.
+
+```{r}
+most <- intersect(mostfatal$EVTYPE[1:10], mostinj$EVTYPE[1:10])
+
+health %>% filter(health$EVTYPE %in% most) %>% arrange(desc(fatalsum))
+```
+
+There are 7 types of storms in both the 10 deadliest types of storms and the 10 types of storms causing the most number of injuries.
+
+**Conclusion:** tornados and excessive heat are the most harmful types of storms to public health, although floods and thunderstorm winds also cause many injured people.
+
+
+### 2. What types of events have the highest economic consequences on the population?
+
+The economic impact of storms is measured in this database in terms of the cost of damages to properties and crops. These are recorded in columns PROPDMG, PROPDMGEXP, CROPDMG and CROPDMGEXP. The -EXP columns can take values "K" (for thousands), "M" ("for millions") or "B" (for billions); no value corresponds to no damage cost. We start by decripting these into numerical values, and calculating the total property/crop damage cost for each storm.
+
+```{r}
+economy <- data %>% select(EVTYPE, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP) %>%
+    filter(PROPDMG!=0 | CROPDMG!=0)
+
+economy$PROPDMGEXP[economy$PROPDMGEXP == ""] <- "0"
+economy$CROPDMGEXP[economy$CROPDMGEXP == ""] <- "0"
+
+map <- setNames(c(0,1E3,1E6,1E9), c("0","K","M","B"))
+economy$PROPDMGEXP <- map[economy$PROPDMGEXP]
+economy$CROPDMGEXP <- map[economy$CROPDMGEXP]
+
+economy <- economy %>% group_by(EVTYPE) %>%
+    summarize(propsum = sum(PROPDMG * PROPDMGEXP), cropsum = sum(CROPDMG * CROPDMGEXP),
+              total = propsum + cropsum)
+```
+
+We now look at the 15 types of storms the caused the most property damage and the 15 that caused the most crop damage.
+
+```{r fig.width=10, fig.height=6}
+mostpropdmg <- economy %>% select(EVTYPE, propsum) %>% arrange(desc(propsum))
+mostcropdmg <- economy %>% select(EVTYPE, cropsum) %>% arrange(desc(cropsum))
+
+top <- intersect(mostpropdmg$EVTYPE[1:15], mostcropdmg$EVTYPE[1:15])
+
+mostdmg <- economy %>% filter(EVTYPE %in% top) %>% arrange(desc(propsum))
+mostdmg$EVTYPE <- factor(mostdmg$EVTYPE, levels = top)
+mostdmg
+```
+
+From the above table we conclude that:
+
+* Floods and hurricanes are the two disasters that caused the most property damage, respectively tallying over 140 and 80 billion US dollars since 1996.
+
+* As for damages to crops, droughts are (probably unsurprisingly) the most destructive, tallying over 13 billion US dollars since 1996, although both hurricanes and floods cause quite considerable damage as well.
+
+We finish this analysis by plotting the total damage cost for each type of event.
+
+```{r fig.width=6, fig.height=6}
+par(mar=c(11, 6, 4, 2) + .1, mgp=c(4.5,1,0))
+barplot(mostdmg$total ~ mostdmg$EVTYPE, xlab='', ylab='Total Damage Cost (USD)',
+        main='Top 11 types of events with most damage cost', las=2)
+par(op)
+```
+
+**Conclusion:** overall, the most economically devastating storms are floods and hurricanes, and droughts cause the most crop damage costs.
+
