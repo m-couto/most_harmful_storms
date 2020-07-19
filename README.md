@@ -9,7 +9,17 @@ This project was part of a course on Reproducible Research in my Data Science sp
 
 ## Explanation of files
 
+- The data can be obtained from: https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2.
+- `documentation.pdf`: some documentation on this database.
 
+The following three files contain different parts of my data analysis:
 
-The data can be obtained from: https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2.
+- `Project_code.R`: loading the data;
+- `Project_code_2.R`: data preprocessing, including thorough cleaning;
+- `project_code_3_analysis`: exploratory analysis for answering the two questions above.
 
+The report of this project is written and available in these files:
+
+- `Disasters_project.Rmd`
+- `Disasters_project.html`
+  - Check html version at: https://m-couto.github.io/most_harmful_storms/Disasters_project.html.
